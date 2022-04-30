@@ -1,0 +1,345 @@
+---
+title: "superstore_data_analysis"
+author: "Ziting Liang"
+date: '2022-04-25'
+output: pdf_document
+---
+
+## Import packages
+```{r,message=FALSE}
+library(dplyr)
+library(car)
+library(ggplot2)
+```
+
+## Read data
+```{r}
+Data<-read.csv('./Sample - Superstore.csv',header=T)
+summary(Data)
+#apply(is.na(Data),2,sum)#No NA
+
+#check for some key variables
+#unique(Data$Variable.name)
+
+#select useful variables
+data.clean<-Data%>%select(Order.Date,Ship.Mode,Customer.ID,Segment,State,Region,Category,
+                          Sub.Category,Sales,Quantity,Discount,Profit)
+summary(data.clean)
+```
+## Variable recoding
+```{r}
+#recode 4 new variables for Ship.Mode
+data.clean$Ship.Mode[data.clean$Ship.Mode=='Second Class']<-1
+data.clean$Ship.Mode[data.clean$Ship.Mode=='Standard Class']<-2
+data.clean$Ship.Mode[data.clean$Ship.Mode=='First Class']<-3
+data.clean$Ship.Mode[data.clean$Ship.Mode=='Same Day']<-4
+
+#recode 3 new variables for Segment
+data.clean$Segment[data.clean$Segment=='Consumer']<-1
+data.clean$Segment[data.clean$Segment=='Corporate']<-2
+data.clean$Segment[data.clean$Segment=='Home Office']<-3
+
+#recode 4 new variables for Region
+data.clean$Region[data.clean$Region=='South']<-1
+data.clean$Region[data.clean$Region=='West']<-2
+data.clean$Region[data.clean$Region=='Central']<-3
+data.clean$Region[data.clean$Region=='East']<-4
+
+#recode 3 new variables for Category
+data.clean$Category[data.clean$Category=='Furniture']<-1
+data.clean$Category[data.clean$Category=='Office Supplies']<-2
+data.clean$Category[data.clean$Category=='Technology']<-3
+
+data.clean$Sales<-round(data.clean$Sales, digits=2) 
+data.clean$Profit<-round(data.clean$Profit, digits=2)
+
+data.clean$Order.Date<-as.Date(data.clean$Order.Date,format='%m/%d/%Y')
+```
+
+
+## Descriptive statistics
+```{r}
+# pie chart of region
+data_region<-data.clean %>% select(Region)
+slices <- table(data.clean$Region)
+count<-slices/sum(slices)*100
+lbls <- c("South", "West", "Central", 'East')
+pie(slices, col=c('pink','lightgreen','lightblue','lightyellow'),
+    labels = paste0(lbls,',',round(count,2),'%'), main="Pie Chart of Region")
+
+# pie chart of Ship.Mode
+data_region<-data.clean %>% select(Ship.Mode)
+slices <- table(data.clean$Ship.Mode)
+count<-slices/sum(slices)*100
+lbls <- c("Second Class", "Standard Class", "First Class", 'Same Day')
+pie(slices, col=c('pink','lightgreen','lightblue','lightyellow'),
+    labels = paste0(lbls,',',round(count,2),'%'), main="Pie Chart of Ship.Mode")
+
+#A comparison of Sales and Profit in 2014-2017
+chrono_data<-data.clean%>%group_by(Order.Date)%>%summarize(Sales=sum(Sales),Profit=sum(Profit))
+matplot(chrono_data$Order.Date, cbind(chrono_data$Sales,chrono_data$Profit),
+        type="l",col=c("orange","navyblue"),lty=c(1,1),xlab='Time',ylab='Sales/Profit',
+        main='Sales and Profit in 2014-2017',axes=F,
+        xlim=c(as.Date('2014-01-01'),as.Date('2018-01-01')))
+Axis(side=2)
+legend(x='topright',legend=c('Sales','Profit'),lty=1,col=c('orange','navyblue'),bty='n')
+axis.Date(1,at=seq(from=as.Date('2014-01-01'),to=as.Date('2018-01-01'),by='3 months'),
+          format='%y-%m',las=3)
+```
+
+## Convert to superstore.reg: preparation for regression
+```{r}
+#data.clean$Order.Date<-as.Date(data.clean$Order.Date,format='%m%d%Y')
+
+#turn category variables to numeric variables
+data.clean$Ship.Mode<-as.numeric(data.clean$Ship.Mode)
+data.clean$Segment<-as.numeric(data.clean$Segment)
+data.clean$Region<-as.numeric(data.clean$Region)
+data.clean$Category<-as.numeric(data.clean$Category)
+
+superstore.reg<-data.clean%>%select(Ship.Mode,Segment,Region,Category,
+                                    Sales,Quantity,Discount,Profit)
+
+#create 4 new variables for Ship.Mode for regression in case of multicollinearity, 
+#and then remove Ship.Mode.
+superstore.reg<-superstore.reg%>%
+  mutate(SM_second_class=as.numeric(Ship.Mode==1),
+         SM_standard_class=as.numeric(Ship.Mode==2),
+         SM_first_class=as.numeric(Ship.Mode==3))%>%
+  select(-Ship.Mode)
+
+#create 3 new variables for Segment for regression in case of multicollinearity, 
+#and then remove Segment.
+superstore.reg<-superstore.reg%>%mutate(Seg_cons=as.numeric(Segment==1),
+                                        Seg_corp=as.numeric(Segment==2))%>%select(-Segment)
+
+#create 4 new variables for Region for regression in case of multicollinearity, 
+#and then remove Region.
+superstore.reg<-superstore.reg%>%mutate(Reg_south=as.numeric(Region==1),
+                                        Reg_west=as.numeric(Region==2),
+                                        Reg_central=as.numeric(Region==3))%>%select(-Region)
+
+#create 3 new variables for Category for regression in case of multicollinearity,
+#and then remove Category.
+superstore.reg<-superstore.reg%>%mutate(Cat_furniture=as.numeric(Category==1),
+                                        Cat_office=as.numeric(Category==2))%>%select(-Category)
+```
+
+## Regression before scale (including Correlation Analysis)
+```{r}
+###Regression
+
+#Do a normality test before the regression
+hist(superstore.reg$Sales, col='pink', main='Sales', breaks=50)
+hist(superstore.reg$Profit, col='pink', main='Profit', breaks=50)
+hist(superstore.reg$Discount, col='pink', main='Discount',breaks=50)
+
+qqnorm(superstore.reg$Sales, main='Sales')
+qqline(superstore.reg$Sales)
+
+qqnorm(superstore.reg$Profit, main='Profit')
+qqline(superstore.reg$Profit)
+
+qqnorm(superstore.reg$Discount, main='Discount')
+qqline(superstore.reg$Discount)
+
+#Do regression and see what's going on
+lm_fit<-lm(Sales~.,superstore.reg)
+summary(lm_fit)#not fit well
+reduced<-lm(Sales~1,superstore.reg)
+full<-lm(Sales~.,superstore.reg)
+step(reduced,scope=c(lower=reduced,upper=full),direction='forward',trace=F)
+step(full,scope=c(lower=reduced,upper=full),direction='backward',trace=F)
+
+#after doing regression, we want to do a correlation analysis to see if all variables are uncorrelated:
+corrplot::corrplot(cor(
+  superstore.reg%>%select(c(Quantity,Discount,Profit,Reg_central,Cat_furniture,Cat_office))),
+  method='number')
+#we want to see what will the model perform if we delete one of cat_furniture or cat_office
+summary(lm(Sales~Quantity+Discount+Profit+Reg_central+Cat_furniture,data=superstore.reg))
+summary(lm(Sales~Quantity+Discount+Profit+Reg_central+Cat_office,data=superstore.reg))
+```
+
+## Regression after scale or preprocessing (including Correlation Analysis)
+```{r}
+#normalization for profit
+superstore.reg.scale<-superstore.reg
+superstore.reg.scale$Profit<-scale(superstore.reg.scale$Profit)
+#take logarithm for sales
+superstore.reg.scale$Sales<-log(superstore.reg.scale$Sales+1)
+
+#Do a normality test before the regression
+hist(superstore.reg.scale$Sales, col='pink', main='Sales', breaks = 50)
+hist(superstore.reg.scale$Profit, col='pink', main='Profit',breaks = 50)
+hist(superstore.reg.scale$Discount, col='pink', main='Discount',breaks = 50)
+
+qqnorm(superstore.reg.scale$Sales, main='Sales')
+qqline(superstore.reg.scale$Sales)
+
+qqnorm(superstore.reg.scale$Profit, main='Profit')
+qqline(superstore.reg.scale$Profit)
+
+qqnorm(superstore.reg.scale$Discount, main='Discount')
+qqline(superstore.reg.scale$Discount)
+
+#Do regression and see what's going on
+lm_fit<-lm(Sales~.,superstore.reg.scale)
+summary(lm_fit)#not fit well
+reduced<-lm(Sales~1,superstore.reg.scale)
+full<-lm(Sales~.,superstore.reg.scale)
+step(reduced,scope=c(lower=reduced,upper=full),direction='forward',trace=F)
+step(full,scope=c(lower=reduced,upper=full),direction='backward',trace=F)
+
+#after doing regression, we want to do a correlation analysis to see if all variables are uncorrelated:
+corrplot::corrplot(cor(
+  superstore.reg.scale%>%
+    select(c(Quantity,Discount,Profit,Reg_central,Cat_furniture,Cat_office))),
+  method='number')
+
+#we want to see what will the model perform if we delete one of cat_furniture or cat_office
+summary(lm(Sales~Quantity+Discount+Profit+Cat_furniture,data=superstore.reg.scale))
+summary(lm(Sales~Quantity+Discount+Profit+Cat_office,data=superstore.reg.scale))
+
+#Regression tree for scaled
+library(rpart)
+rt<-rpart(Sales~Quantity+Discount+Profit+Cat_office,superstore.reg.scale)
+par(xpd = TRUE)
+plot(rt, compress = TRUE)
+text(rt, use.n = TRUE,cex=0.55)
+```
+
+## ANCOVA
+```{r}
+#transfer data
+ancova_data<-data.clean %>%select(Sales,Profit,Discount)
+idx<-1:9994
+disc_No<-idx[ancova_data$Discount==0]
+disc_Low<-idx[ancova_data$Discount>0&ancova_data$Discount<=0.2]
+disc_High<-idx[ancova_data$Discount>0.2]
+ancova_data$Discount[disc_No]<-'No'
+ancova_data$Discount[disc_Low]<-'Low'
+ancova_data$Discount[disc_High]<-'High'
+
+rm(disc_No,disc_Low,disc_High,idx)
+#EDA and summary
+ancova_data %>%
+  group_by(Discount) %>%  
+  summarise(mean_sales = mean(Sales),
+            median_sales = median(Sales),
+            sd_sales = sd(Sales),
+            mean_profit = mean(Profit),
+            median_profit = median(Profit),
+            sd_profit = sd(Profit))
+#boxplot
+boxplot(Profit ~ Discount,data = ancova_data,main = "Profit by Discount",
+        xlab = "Discount",ylab = "Profit",col = "blue",border = "pink")
+boxplot(Sales ~ Discount,data = ancova_data,main = "Sales by Discount",
+        xlab = "Discount",ylab = "Sales",col = "blue",border = "pink")
+
+#hypothesis testing:independence btw discount and sales, and equality of variance
+summary(aov(Sales ~ Discount,data = ancova_data))
+#The p-value is 0.136 that is greater than 0.05, so Discount and Sales are independent to each other.
+
+#Levene’s Test
+leveneTest(Profit~Discount, data = ancova_data)
+#The p-value of the test is 2.2e-16, which indicates that the variances among the groups are not equal.
+
+#Fit analysis of covariance model ANCOVA
+ancova_model <- aov(Profit ~ Discount + Sales, data = ancova_data)
+Anova(ancova_model, type="III")
+```
+From this result, we can conclude that no matter we control discount or sales still, the other variable is significant in this model, which indicates that they will significantly contribute to the model. From two significant p-value of Discount and Sales, we may say that: (1) different Discount will influence the relationship between Sales and Profit, and (2) sales does have relationship to profit.
+
+```{r}
+lm_ancova<-lm(Profit~Sales+Sales:Discount,data=ancova_data)
+summary(lm_ancova)
+```
+From this linear model with interaction of Sales and Discount, we may say that different discount will contribute different relationship between Sales and Profit. Here, when discount is 0, the coefficient is 0.5684-0.2032=0.3652; when discount is low, the coefficient is 0.3726-0.2032=0.1694; when discount is high, the coefficient is -0.2032.
+
+```{r}
+tableone<-data.frame(ancova_data$Discount, data.clean$Category)
+slices <- table(tableone$ancova_data.Discount)
+count<-slices/sum(slices)*100
+lbls <- c("High", "Low", "No")
+pie(slices, col=c('pink','brown','purple'),labels = paste0(lbls,',',round(count,2),'%'), 
+    main="Pie Chart of Discount")
+
+tableone_high<-tableone %>% filter(ancova_data$Discount=='High')
+slices <- table(tableone_high$data.clean.Category)
+count<-slices/sum(slices)*100
+lbls <- c("Furniture", "Office Supplies", "Technology")
+pie(slices, col=c('pink','brown','purple'),labels = paste0(lbls,',',round(count,2),'%'), 
+    main="Pie Chart of Categories with High Discount")
+
+
+```
+
+
+
+
+## RFM analysis
+```{r}
+#create RFM table
+RFM.data<-data.clean[lubridate::year(data.clean$Order.Date)%in%c(2016,2017),]
+RFM.table<-RFM.data%>%
+  group_by(Customer.ID)%>%
+  summarize(Recency=max(Order.Date),Frequency=n(),Monetary=sum(Sales))
+RFM.table$Recency<-as.numeric((as.Date('2017-12-31')-RFM.table$Recency))
+summary(RFM.table)
+
+#Scored data
+rfm_scored<-RFM.table
+rfm_scored$r_score <- rep(0,773)
+rfm_scored$r_score[RFM.table$Recency >= 163.0] <- 1
+rfm_scored$r_score[RFM.table$Recency >=73.0 & RFM.table$Recency < 163.0] <- 2
+rfm_scored$r_score[RFM.table$Recency >=30.0 & RFM.table$Recency < 73.0] <- 3
+rfm_scored$r_score[RFM.table$Recency < 30.0] <- 4
+
+rfm_scored$f_score <- rep(0,773)
+rfm_scored$f_score[RFM.table$Frequency >= 10.000] <- 1
+rfm_scored$f_score[RFM.table$Frequency >=7.000 & RFM.table$Frequency < 10.000] <- 2
+rfm_scored$f_score[RFM.table$Frequency >=4.000 & RFM.table$Frequency < 7.000] <- 3
+rfm_scored$f_score[RFM.table$Frequency < 4.000] <- 4
+
+rfm_scored$m_score <- rep(0,773)
+rfm_scored$m_score[RFM.table$Monetary >= 2216.88] <- 1
+rfm_scored$m_score[RFM.table$Monetary >=1194.96 & RFM.table$Monetary < 2216.88] <- 2
+rfm_scored$m_score[RFM.table$Monetary >=519.76 & RFM.table$Monetary < 1194.96] <- 3
+rfm_scored$m_score[RFM.table$Monetary <519.76] <- 4
+
+rfm_scored<-rfm_scored %>% 
+  mutate(RFM_score=r_score*100+f_score*10+m_score) %>%
+  select(Customer.ID,r_score,f_score,m_score,RFM_score)
+
+#segments
+rfm_scored$Segment <- "0"
+rfm_scored$Segment[which(rfm_scored$RFM_score 
+  %in% c(444,434,443, 344, 442, 244, 424, 441))] <-"Loyalists"
+rfm_scored$Segment[which(rfm_scored$RFM_score 
+  %in% c(332,333,342,343,334,412,413,414,431,432,441,421,422,423,424,433))]<- "Potential Loyalists"
+rfm_scored$Segment[which(rfm_scored$RFM_score 
+  %in% c(233,234, 241,311, 312, 313,314,321,322,323,324, 331,  341))] <- "Promising"
+rfm_scored$Segment[which(rfm_scored$RFM_score 
+  %in% c(124, 133, 134, 142, 143, 144, 214,224,234, 242, 243, 232 ))] <- "Hesitant"
+rfm_scored$Segment[which(rfm_scored$RFM_score 
+  %in% c(122, 123,131 ,132, 141, 212, 213, 221, 222, 223, 231 ))] <- "Need attention"
+rfm_scored$Segment[which(rfm_scored$RFM_score 
+  %in% c(111, 112, 113, 114, 121, 131, 211, 311, 411 ))] <-"Detractors"
+
+#plot of segments
+rfm_scored%>%
+  group_by(Segment)%>%
+  summarize(Count=n())%>%
+  ggplot(aes(x = forcats::fct_reorder(Segment, Count),y=Count,fill = Segment)) + 
+  geom_bar(stat='identity')+
+  geom_text(aes(label=Count),nudge_y=-.5,color="white",size = 3.5,vjust=1.2)+
+  theme(axis.text.x=element_text(angle=30,hjust=1))+
+  labs(title = "Barplot for Segments of customers")
+
+
+
+```
+
+
+
+
