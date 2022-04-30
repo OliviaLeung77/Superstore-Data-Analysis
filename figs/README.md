@@ -1,2 +1,1 @@
-# SQL-Library-Project
-Create a database for a virtual bookstore.
+# Superstore Data Analysis
